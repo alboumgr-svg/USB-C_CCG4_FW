@@ -1504,37 +1504,54 @@ static void dp_bridge_dfp_sync(void)
     send_cmd(port);
 }
 
+/* Type-C attach progress of a port: 1 = nothing on CC, 2 = Rp seen on CC but not
+   attached (e.g. no VBUS), 3 = attached without PD contract, 0 = PD contract. */
+static uint8_t dp_bridge_attach_stage(uint8_t port)
+{
+    const dpm_status_t *dpm = dpm_get_info(port);
+
+    if (dpm->contract_exist)
+    {
+        return 0;
+    }
+    if (dpm->attach)
+    {
+        return 3;
+    }
+    /* As a Sink, CC reads RD_RA (0) when nothing pulls up the line. */
+    if ((dpm->cc_live.cc[0] != RD_RA) || (dpm->cc_live.cc[1] != RD_RA) ||
+            (dpm->typec_gn_fsm_state == TYPEC_GN_FSM_ATTACH_WAIT))
+    {
+        return 2;
+    }
+    return 1;
+}
+
 void dp_bridge_get_stage(uint8_t *lcd_stage, uint8_t *host_stage)
 {
     uint8_t lp = DP_BRIDGE_DFP_PORT;
     uint8_t hp = DP_BRIDGE_UFP_PORT;
-    const dpm_status_t *dpm;
     uint8_t s;
 
     /* Values are blink counts (always at least 1). Each stage requires the previous ones. */
 
     /* LCD side (port 1). */
-    dpm = dpm_get_info(lp);
-    s = 1;                                              /* 1: nothing attached. */
-    if (dpm->attach)
+    s = dp_bridge_attach_stage(lp);                     /* 1: CC open, 2: Rp but no attach, 3: no contract. */
+    if (s == 0)
     {
-        s = 2;                                          /* 2: Type-C attached, no PD contract. */
-        if (dpm->contract_exist)
+        s = 4;                                          /* 4: PD contract, CCG still UFP. */
+        if (gl_dpm_port_type[lp] != PRT_TYPE_UFP)
         {
-            s = 3;                                      /* 3: PD contract, CCG still UFP. */
-            if (gl_dpm_port_type[lp] != PRT_TYPE_UFP)
+            s = 5;                                      /* 5: CCG is DFP (DR_SWAP done). */
+            if ((dp_info(lp)->cbk == dp_dfp_run) && (dp_info(lp)->is_active != false))
             {
-                s = 4;                                  /* 4: CCG is DFP (DR_SWAP done). */
-                if ((dp_info(lp)->cbk == dp_dfp_run) && (dp_info(lp)->is_active != false))
+                s = 6;                                  /* 6: DP mode entered on LCD. */
+                if (gl_dp_bridge.dfp_cfg != DP_USB_SS_CONFIG)
                 {
-                    s = 5;                              /* 5: DP mode entered on LCD. */
-                    if (gl_dp_bridge.dfp_cfg != DP_USB_SS_CONFIG)
+                    s = 7;                              /* 7: LCD configured for DP. */
+                    if (gl_dp_bridge.hpd_high != false)
                     {
-                        s = 6;                          /* 6: LCD configured for DP. */
-                        if (gl_dp_bridge.hpd_high != false)
-                        {
-                            s = 7;                      /* 7: LCD reports HPD high. */
-                        }
+                        s = 8;                          /* 8: LCD reports HPD high. */
                     }
                 }
             }
@@ -1543,27 +1560,22 @@ void dp_bridge_get_stage(uint8_t *lcd_stage, uint8_t *host_stage)
     *lcd_stage = s;
 
     /* Host side (port 0). */
-    dpm = dpm_get_info(hp);
-    s = 1;                                              /* 1: nothing attached. */
-    if (dpm->attach)
+    s = dp_bridge_attach_stage(hp);                     /* 1: CC open, 2: Rp but no attach, 3: no contract. */
+    if (s == 0)
     {
-        s = 2;                                          /* 2: Type-C attached, no PD contract. */
-        if (dpm->contract_exist)
+        s = 4;                                          /* 4: PD contract, but CCG is DFP (wrong). */
+        if (gl_dpm_port_type[hp] == PRT_TYPE_UFP)
         {
-            s = 3;                                      /* 3: PD contract, but CCG is DFP (wrong). */
-            if (gl_dpm_port_type[hp] == PRT_TYPE_UFP)
+            s = 5;                                      /* 5: PD contract, CCG is UFP. */
+            if ((dp_info(hp)->cbk == dp_ufp_run) && (dp_info(hp)->is_active != false))
             {
-                s = 4;                                  /* 4: PD contract, CCG is UFP. */
-                if ((dp_info(hp)->cbk == dp_ufp_run) && (dp_info(hp)->is_active != false))
+                s = 6;                                  /* 6: Host entered DP mode. */
+                if (gl_dp_bridge.host_cfg != DP_INVALID_CFG)
                 {
-                    s = 5;                              /* 5: Host entered DP mode. */
-                    if (gl_dp_bridge.host_cfg != DP_INVALID_CFG)
+                    s = 7;                              /* 7: Host configured DP. */
+                    if ((dp[hp].status_vdo.val & (1u << DP_STAT_HPD)) != 0)
                     {
-                        s = 6;                          /* 6: Host configured DP. */
-                        if ((dp[hp].status_vdo.val & (1u << DP_STAT_HPD)) != 0)
-                        {
-                            s = 7;                      /* 7: HPD high reported to host. */
-                        }
+                        s = 8;                          /* 8: HPD high reported to host. */
                     }
                 }
             }
