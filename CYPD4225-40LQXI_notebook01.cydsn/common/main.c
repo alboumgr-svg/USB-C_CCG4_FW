@@ -248,23 +248,24 @@ update_hpi_regs (
 /*
  * DP bridge diagnostic blink code on the FW LED, repeated continuously:
  *   1 long flash (1 s)           -> start marker
- *   N short blinks               -> LCD side (port 1) stage
- *   pause
- *   M short blinks               -> host side (port 0) stage
- *   long pause
+ *   N short blinks               -> LCD side (port 1) stage, always >= 1
+ *   2 s pause
+ *   M short blinks               -> host side (port 0) stage, always >= 1
+ *   3 s pause
  *
- * LCD side stages (port 1):            Host side stages (port 0):
- *   0: no PD contract                    0: no PD contract
- *   1: PD contract                       1: PD contract
- *   2: CCG is DFP (DR_SWAP done)         2: CCG is UFP
- *   3: DP mode entered on the LCD        3: host entered DP mode
- *   4: LCD configured for DP (C/D)       4: host configured DP (C/D)
- *   5: LCD reports HPD high              5: HPD high reported to the host
+ * LCD side (port 1):                     Host side (port 0):
+ *   1: nothing attached                    1: nothing attached
+ *   2: Type-C attached, no PD contract     2: Type-C attached, no PD contract
+ *   3: PD contract, CCG still UFP          3: PD contract, but CCG is DFP (wrong)
+ *   4: CCG is DFP (DR_SWAP done)           4: PD contract, CCG is UFP
+ *   5: DP mode entered on the LCD          5: host entered DP mode
+ *   6: LCD configured for DP (C/D)         6: host configured DP (C/D)
+ *   7: LCD reports HPD high                7: HPD high reported to the host
  */
 #define LED_SHORT_ON_MS         (250u)
 #define LED_SHORT_OFF_MS        (350u)
 #define LED_MARKER_ON_MS        (1000u)
-#define LED_GROUP_GAP_MS        (1500u)
+#define LED_GROUP_GAP_MS        (2000u)
 #define LED_END_GAP_MS          (3000u)
 
 void led_timer_cb (

@@ -1508,25 +1508,33 @@ void dp_bridge_get_stage(uint8_t *lcd_stage, uint8_t *host_stage)
 {
     uint8_t lp = DP_BRIDGE_DFP_PORT;
     uint8_t hp = DP_BRIDGE_UFP_PORT;
+    const dpm_status_t *dpm;
     uint8_t s;
 
-    /* LCD side (port 1): each stage requires the previous ones. */
-    s = 0;
-    if (dpm_get_info(lp)->contract_exist)
+    /* Values are blink counts (always at least 1). Each stage requires the previous ones. */
+
+    /* LCD side (port 1). */
+    dpm = dpm_get_info(lp);
+    s = 1;                                              /* 1: nothing attached. */
+    if (dpm->attach)
     {
-        s = 1;                                          /* 1: PD contract. */
-        if (gl_dpm_port_type[lp] != PRT_TYPE_UFP)
+        s = 2;                                          /* 2: Type-C attached, no PD contract. */
+        if (dpm->contract_exist)
         {
-            s = 2;                                      /* 2: CCG is DFP (DR_SWAP done). */
-            if ((dp_info(lp)->cbk == dp_dfp_run) && (dp_info(lp)->is_active != false))
+            s = 3;                                      /* 3: PD contract, CCG still UFP. */
+            if (gl_dpm_port_type[lp] != PRT_TYPE_UFP)
             {
-                s = 3;                                  /* 3: DP mode entered on LCD. */
-                if (gl_dp_bridge.dfp_cfg != DP_USB_SS_CONFIG)
+                s = 4;                                  /* 4: CCG is DFP (DR_SWAP done). */
+                if ((dp_info(lp)->cbk == dp_dfp_run) && (dp_info(lp)->is_active != false))
                 {
-                    s = 4;                              /* 4: LCD configured for DP. */
-                    if (gl_dp_bridge.hpd_high != false)
+                    s = 5;                              /* 5: DP mode entered on LCD. */
+                    if (gl_dp_bridge.dfp_cfg != DP_USB_SS_CONFIG)
                     {
-                        s = 5;                          /* 5: LCD reports HPD high. */
+                        s = 6;                          /* 6: LCD configured for DP. */
+                        if (gl_dp_bridge.hpd_high != false)
+                        {
+                            s = 7;                      /* 7: LCD reports HPD high. */
+                        }
                     }
                 }
             }
@@ -1535,22 +1543,27 @@ void dp_bridge_get_stage(uint8_t *lcd_stage, uint8_t *host_stage)
     *lcd_stage = s;
 
     /* Host side (port 0). */
-    s = 0;
-    if (dpm_get_info(hp)->contract_exist)
+    dpm = dpm_get_info(hp);
+    s = 1;                                              /* 1: nothing attached. */
+    if (dpm->attach)
     {
-        s = 1;                                          /* 1: PD contract. */
-        if (gl_dpm_port_type[hp] == PRT_TYPE_UFP)
+        s = 2;                                          /* 2: Type-C attached, no PD contract. */
+        if (dpm->contract_exist)
         {
-            s = 2;                                      /* 2: CCG is UFP. */
-            if ((dp_info(hp)->cbk == dp_ufp_run) && (dp_info(hp)->is_active != false))
+            s = 3;                                      /* 3: PD contract, but CCG is DFP (wrong). */
+            if (gl_dpm_port_type[hp] == PRT_TYPE_UFP)
             {
-                s = 3;                                  /* 3: Host entered DP mode. */
-                if (gl_dp_bridge.host_cfg != DP_INVALID_CFG)
+                s = 4;                                  /* 4: PD contract, CCG is UFP. */
+                if ((dp_info(hp)->cbk == dp_ufp_run) && (dp_info(hp)->is_active != false))
                 {
-                    s = 4;                              /* 4: Host configured DP. */
-                    if ((dp[hp].status_vdo.val & (1u << DP_STAT_HPD)) != 0)
+                    s = 5;                              /* 5: Host entered DP mode. */
+                    if (gl_dp_bridge.host_cfg != DP_INVALID_CFG)
                     {
-                        s = 5;                          /* 5: HPD high reported to host. */
+                        s = 6;                          /* 6: Host configured DP. */
+                        if ((dp[hp].status_vdo.val & (1u << DP_STAT_HPD)) != 0)
+                        {
+                            s = 7;                      /* 7: HPD high reported to host. */
+                        }
                     }
                 }
             }
