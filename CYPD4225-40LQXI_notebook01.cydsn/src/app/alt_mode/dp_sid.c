@@ -133,6 +133,36 @@ static void dp_assign_vdo(uint8_t port, uint32_t vdo);
 static bool dp_eval_app_cmd(uint8_t port, alt_mode_evt_t cmd_data);
 #endif /* DP_DFP_SUPP || DP_UFP_SUPP */
 
+#if DP_BRIDGE_ENABLE
+
+#if ((DP_DFP_SUPP == 0) || (DP_UFP_SUPP == 0))
+#error "DP_BRIDGE_ENABLE requires both DP_DFP_SUPP and DP_UFP_SUPP."
+#endif
+
+#include <timer.h>
+
+/* State shared between the host facing (UFP) and LCD facing (DFP) ports. */
+typedef struct
+{
+    bool    hpd_high;       /* Last HPD level reported by the LCD on the DFP port. */
+    bool    mf_pref;        /* LCD requested multi-function (2 lane DP + USB). */
+    bool    att_pending;    /* Send HPD Attention to the host after its Configure. */
+    uint8_t host_cfg;       /* Pin assignment configured by the host, DP_INVALID_CFG if none. */
+    uint8_t dfp_cfg;        /* Pin assignment ACKed by the LCD, DP_USB_SS_CONFIG if none. */
+} dp_bridge_t;
+
+static dp_bridge_t gl_dp_bridge = {false, false, false, DP_INVALID_CFG, DP_USB_SS_CONFIG};
+
+/* Relays an HPD event from the LCD (DFP port) to the host (UFP port). */
+static void dp_bridge_hpd_to_ufp(hpd_event_type_t evt);
+/* Converts LCD DP Status HPD/IRQ bits into HPD events for the host. */
+static void dp_bridge_fwd_dfp_status(uint32_t status);
+/* HPD level reported to the host. */
+static bool dp_ufp_hpd_level(uint8_t port);
+/* Applies the host's pin assignment to the LCD port if needed. */
+static void dp_bridge_dfp_sync(void);
+#endif /* DP_BRIDGE_ENABLE */
+
 #if DP_DFP_SUPP
 static void dp_set_app_evt(uint8_t port, uint32_t evtype, uint32_t evdata)
 {
@@ -151,7 +181,13 @@ alt_mode_info_t* reg_dp_modes(uint8_t port, alt_mode_reg_info_t* reg_info)
     {
 #if DP_UFP_SUPP
         /* If DP sink */
-        if (reg_info->data_role == PRT_TYPE_UFP)
+        if (
+                (reg_info->data_role == PRT_TYPE_UFP)
+#if DP_BRIDGE_ENABLE
+                /* Only the host facing port acts as DP sink. */
+                && (port == DP_BRIDGE_UFP_PORT)
+#endif /* DP_BRIDGE_ENABLE */
+           )
         {
             /* Reset DP info struct */
             reset_alt_mode_info(&(dp[port].info));
@@ -173,13 +209,23 @@ alt_mode_info_t* reg_dp_modes(uint8_t port, alt_mode_reg_info_t* reg_info)
             {
                 dp[port].ccg_dp_pins_supp = reg_info->svid_vdo.std_dp_vdo.dfp_d_pin;
             }
+#if DP_BRIDGE_ENABLE
+            dp[port].ccg_dp_pins_supp &= DP_BRIDGE_PIN_MASK;
+#endif /* DP_BRIDGE_ENABLE */
 
             return &(dp[port].info);
         }
 #endif /* DP_UFP_SUPP */
 
 #if DP_DFP_SUPP
-        if (reg_info->atch_type == ATCH_TGT)
+        if (
+                (reg_info->atch_type == ATCH_TGT)
+#if DP_BRIDGE_ENABLE
+                /* Only the LCD facing port acts as DP source, and only as DFP. */
+                && (port == DP_BRIDGE_DFP_PORT)
+                && (reg_info->data_role != PRT_TYPE_UFP)
+#endif /* DP_BRIDGE_ENABLE */
+           )
         {
             /* Reset DP info struct */
             reset_alt_mode_info(&(dp[port].info));
@@ -392,6 +438,9 @@ static dp_state_t analyse_dp_sink_vdo(uint8_t port, pd_do_t svid_vdo)
     {
         /* Read DP_MODES_SUPPORTED in DP structure. */
         dp[port].ccg_dp_pins_supp = get_pd_port_config(port)->dp_config_supported;
+#if DP_BRIDGE_ENABLE
+        dp[port].ccg_dp_pins_supp &= DP_BRIDGE_PIN_MASK;
+#endif /* DP_BRIDGE_ENABLE */
 
         /* If DP Interface is presented on a USB TYPE C receptacle,
          * compare with UFP_D Pin Assignments advertised by UFP. */
@@ -452,6 +501,15 @@ static dp_state_t eval_ufp_status(uint8_t port)
 
     pd_do_t status = *dp_get_vdo(port);
     dp[port].status_vdo = status;
+
+#if DP_BRIDGE_ENABLE
+    /* Mirror the LCD's multi-function preference into the status reported to the host. */
+    gl_dp_bridge.mf_pref = (bool)status.dp_stat_vdo.mult_fun;
+    if (dp_info(DP_BRIDGE_UFP_PORT)->cbk == dp_ufp_run)
+    {
+        dp_ufp_update_status_field(DP_BRIDGE_UFP_PORT, DP_STAT_MF, gl_dp_bridge.mf_pref);
+    }
+#endif /* DP_BRIDGE_ENABLE */
 
     dp[port].config_vdo.val = 0;
 
@@ -523,6 +581,27 @@ static dp_state_t eval_ufp_status(uint8_t port)
         }
     }
 
+#if DP_BRIDGE_ENABLE
+    /*
+     * The high speed lanes go straight from host to LCD, so both ends must use
+     * the same pin assignment. If the host has already configured DP, use its
+     * pin assignment instead of CCG's own choice.
+     */
+    if ((dp_mode) && (gl_dp_bridge.host_cfg != DP_INVALID_CFG) &&
+            (is_prtnr_ccg_consistent(port, gl_dp_bridge.host_cfg)))
+    {
+        dp_asgn = gl_dp_bridge.host_cfg;
+
+        /* Nothing to do if the LCD is already in that configuration. */
+        if ((dp[port].dp_active_flag != false) &&
+                (gl_dp_bridge.dfp_cfg == dp_asgn))
+        {
+            dp_mode = false;
+            ret     = DP_STATE_IDLE;
+        }
+    }
+#endif /* DP_BRIDGE_ENABLE */
+
     if (dp_mode)
     {
         dp[port].config_vdo.dp_cfg_vdo.dfp_asgmnt = dp_asgn;
@@ -564,6 +643,14 @@ static void init_dp(uint8_t port)
 
 void dp_dfp_enqueue_hpd(uint8_t port, uint32_t status)
 {
+#if DP_BRIDGE_ENABLE
+    if (port == DP_BRIDGE_DFP_PORT)
+    {
+        /* Relay the LCD's HPD state to the host. */
+        dp_bridge_fwd_dfp_status(status);
+    }
+#endif /* DP_BRIDGE_ENABLE */
+
     switch(GET_HPD_IRQ_STAT(status))
     {
         case HPD_LOW_IRQ_LOW:
@@ -671,12 +758,20 @@ static void dp_ufp_run(uint8_t port)
                     dp_ufp_update_status_field(port, DP_STAT_UFP_CONN, true);
 #endif /* DP_UFP_MONITOR */
 
+#if DP_BRIDGE_ENABLE
+                    /* Request multi-function only if the LCD asked for it, so the
+                       host picks the same pin assignment as the LCD prefers. */
+                    dp_ufp_update_status_field(port, DP_STAT_MF,
+                            ((gl_dp_bridge.mf_pref) &&
+                             ((dp[port].ccg_dp_pins_supp & DP_DFP_D_CONFIG_D) != NO_DATA)));
+#else
                     /* Check if Multi-function allowed */
                     if (((dp[port].ccg_dp_pins_supp & DP_DFP_D_CONFIG_D) != NO_DATA) ||
                             ((dp[port].ccg_dp_pins_supp & DP_DFP_D_CONFIG_F) != NO_DATA))
                     {
                         dp_ufp_update_status_field(port, DP_STAT_MF, true);
                     }
+#endif /* DP_BRIDGE_ENABLE */
 
                     /* No VDO is needed in response */
                     dp_assign_vdo(port, NONE_VDO);
@@ -685,7 +780,11 @@ static void dp_ufp_run(uint8_t port)
 
                 case DP_STATE_STATUS_UPDATE:
                     /* Update current HPD status */
+#if DP_BRIDGE_ENABLE
+                    dp_ufp_update_status_field(port, DP_STAT_HPD, dp_ufp_hpd_level(port));
+#else
                     dp_ufp_update_status_field(port, DP_STAT_HPD, dp_snk_get_hpd_state(port));
+#endif /* DP_BRIDGE_ENABLE */
 #if DP_UFP_DONGLE
 #if DP_GPIO_CONFIG_SELECT
                     /*
@@ -743,6 +842,9 @@ static void dp_ufp_run(uint8_t port)
                         /* Get DP Pin configuration supported from config table. */
                         uint8_t dp_config = get_pd_port_config(port)->dp_config_supported;
 #endif /* DP_GPIO_CONFIG_SELECT */
+#if DP_BRIDGE_ENABLE
+                        dp_config &= DP_BRIDGE_PIN_MASK;
+#endif /* DP_BRIDGE_ENABLE */
                         if (
                                 ((is_config_correct(port)) &&
                                  (dp_config & dp[port].partner_dp_pins_supp)) ||
@@ -755,6 +857,22 @@ static void dp_ufp_run(uint8_t port)
                             dp[port].dp_mux_cfg = dp_eval_config(port);
                             /* Set DP MUX */
                             set_mux(port, dp[port].dp_mux_cfg, NO_DATA);
+#if DP_BRIDGE_ENABLE
+                            if (dp[port].dp_active_flag != false)
+                            {
+                                /* Host selected a DP pin assignment: apply it on the LCD
+                                   port and re-send the current HPD state to the host. */
+                                gl_dp_bridge.host_cfg    = dp[port].config_vdo.dp_cfg_vdo.dfp_asgmnt;
+                                gl_dp_bridge.att_pending = true;
+                                timer_start(port, APP_BRIDGE_ATT_TIMER, APP_BRIDGE_ATT_TIMER_PERIOD, NULL);
+                            }
+                            else
+                            {
+                                /* Host moved back to USB configuration. */
+                                gl_dp_bridge.host_cfg    = DP_INVALID_CFG;
+                                gl_dp_bridge.att_pending = false;
+                            }
+#endif /* DP_BRIDGE_ENABLE */
                             dp_assign_vdo(port, NONE_VDO);
                             dp_info(port)->mode_state = ALT_MODE_STATE_IDLE;
                             return;
@@ -1046,6 +1164,13 @@ static bool is_prtnr_ccg_consistent(uint8_t port, uint8_t config)
 
 static mux_select_t dp_eval_config(uint8_t port)
 {
+#if DP_BRIDGE_ENABLE
+    /* Remember the pin assignment the LCD has accepted. */
+    if (port == DP_BRIDGE_DFP_PORT)
+    {
+        gl_dp_bridge.dfp_cfg = dp[port].config_vdo.dp_cfg_vdo.dfp_asgmnt;
+    }
+#endif /* DP_BRIDGE_ENABLE */
 
     switch (dp[port].config_vdo.dp_cfg_vdo.dfp_asgmnt)
     {
@@ -1111,6 +1236,22 @@ static pd_do_t* dp_get_vdo(uint8_t port)
 
 static void dp_exit(uint8_t port)
 {
+#if DP_BRIDGE_ENABLE
+    if (port == DP_BRIDGE_DFP_PORT)
+    {
+        /* LCD left DP mode (exit, detach, hard reset): HPD is gone for the host. */
+        gl_dp_bridge.dfp_cfg = DP_USB_SS_CONFIG;
+        gl_dp_bridge.mf_pref = false;
+        dp_bridge_hpd_to_ufp(HPD_EVENT_UNPLUG);
+    }
+    if (port == DP_BRIDGE_UFP_PORT)
+    {
+        /* Host left DP mode. */
+        gl_dp_bridge.host_cfg    = DP_INVALID_CFG;
+        gl_dp_bridge.att_pending = false;
+    }
+#endif /* DP_BRIDGE_ENABLE */
+
     reset_dp_var(port);
     eval_hpd_cmd(port, HPD_DISABLE_CMD);
     alt_mode_hw_set_cbk(port, NULL);
@@ -1262,5 +1403,152 @@ static bool dp_eval_app_cmd(uint8_t port, alt_mode_evt_t cmd_data)
     return false;
 }
 #endif /* DP_DFP_SUPP || DP_UFP_SUPP */
+
+/************************* DP Bridge Functions definitions ********************/
+
+#if DP_BRIDGE_ENABLE
+
+static bool dp_ufp_hpd_level(uint8_t port)
+{
+    /* On the host facing port HPD comes from the LCD, not from the HPD pin. */
+    if (port == DP_BRIDGE_UFP_PORT)
+    {
+        return gl_dp_bridge.hpd_high;
+    }
+
+    return dp_snk_get_hpd_state(port);
+}
+
+static void dp_bridge_hpd_to_ufp(hpd_event_type_t evt)
+{
+    uint8_t uport = DP_BRIDGE_UFP_PORT;
+
+    if (evt == HPD_EVENT_UNPLUG)
+    {
+        gl_dp_bridge.hpd_high = false;
+    }
+    else if (evt == HPD_EVENT_PLUG)
+    {
+        gl_dp_bridge.hpd_high = true;
+    }
+
+    /*
+     * If the host has DP mode entered on the UFP port, queue the event; this
+     * sends an Attention VDM with the updated DP Status when it changes.
+     * Otherwise the level is reported in the next Status Update response.
+     */
+    if (
+            (gl_dpm_port_type[uport] == PRT_TYPE_UFP) &&
+            (dp_info(uport)->cbk == dp_ufp_run) &&
+            (dp_info(uport)->is_active != false)
+       )
+    {
+        dp_ufp_enqueue_hpd(uport, evt);
+    }
+}
+
+static void dp_bridge_fwd_dfp_status(uint32_t status)
+{
+    switch (GET_HPD_IRQ_STAT(status))
+    {
+        case HPD_LOW_IRQ_LOW:
+            dp_bridge_hpd_to_ufp(HPD_EVENT_UNPLUG);
+            break;
+        case HPD_HIGH_IRQ_LOW:
+            dp_bridge_hpd_to_ufp(HPD_EVENT_PLUG);
+            break;
+        case HPD_LOW_IRQ_HIGH:
+            dp_bridge_hpd_to_ufp(HPD_EVENT_IRQ);
+            break;
+        case HPD_HIGH_IRQ_HIGH:
+            dp_bridge_hpd_to_ufp(HPD_EVENT_PLUG);
+            dp_bridge_hpd_to_ufp(HPD_EVENT_IRQ);
+            break;
+        default:
+            break;
+    }
+}
+
+static void dp_bridge_dfp_sync(void)
+{
+    uint8_t port = DP_BRIDGE_DFP_PORT;
+    uint8_t cfg  = gl_dp_bridge.host_cfg;
+
+    /*
+     * Re-configure the LCD only when: the host has chosen a DP pin assignment,
+     * the LCD side is in DP mode, configured, idle, and on a different pin
+     * assignment that it supports. If the LCD is not configured yet, the host
+     * pin assignment gets picked up in eval_ufp_status().
+     */
+    if (
+            (cfg == DP_INVALID_CFG) ||
+            (gl_dpm_port_type[port] == PRT_TYPE_UFP) ||
+            (dp_info(port)->cbk != dp_dfp_run) ||
+            (dp_info(port)->is_active == false) ||
+            (dp_info(port)->mode_state != ALT_MODE_STATE_IDLE) ||
+            (dp[port].dp_cfg_ec_ctrl != false) ||
+            (dp[port].dp_active_flag == false) ||
+            (gl_dp_bridge.dfp_cfg == cfg) ||
+            (is_prtnr_ccg_consistent(port, cfg) == false)
+       )
+    {
+        return;
+    }
+
+    dp[port].state = DP_STATE_CONFIG;
+    dp[port].config_vdo.val = 0;
+    dp[port].config_vdo.dp_cfg_vdo.dfp_asgmnt = cfg;
+    dp[port].config_vdo.dp_cfg_vdo.sign = DP_1_3_SIGNALING;
+    dp[port].config_vdo.dp_cfg_vdo.sel_conf = DP_CONFIG_SELECT;
+    dp_assign_vdo(port, dp[port].config_vdo.val);
+    send_cmd(port);
+}
+
+void dp_bridge_task(uint8_t port)
+{
+    if (port == DP_BRIDGE_DFP_PORT)
+    {
+        /* Keep the LCD pin assignment in line with the host's choice. */
+        dp_bridge_dfp_sync();
+        return;
+    }
+
+    if (
+            (port != DP_BRIDGE_UFP_PORT) ||
+            (gl_dp_bridge.att_pending == false) ||
+            (timer_is_running(port, APP_BRIDGE_ATT_TIMER) != false)
+       )
+    {
+        return;
+    }
+
+    /* Host left DP mode in the meantime. */
+    if ((dp_info(port)->cbk != dp_ufp_run) || (dp_info(port)->is_active == false))
+    {
+        gl_dp_bridge.att_pending = false;
+        return;
+    }
+
+    /* Wait until no other DP VDM is in progress on the host port. */
+    if (dp_info(port)->mode_state != ALT_MODE_STATE_IDLE)
+    {
+        timer_start(port, APP_BRIDGE_ATT_TIMER, APP_BRIDGE_ATT_TIMER_PERIOD, NULL);
+        return;
+    }
+
+    gl_dp_bridge.att_pending = false;
+
+    /*
+     * If the LCD already reported HPD high before the host configured DP,
+     * send an Attention so the host sees HPD after Configure.
+     */
+    if ((dp[port].dp_active_flag != false) && (gl_dp_bridge.hpd_high != false))
+    {
+        dp_ufp_update_status_field(port, DP_STAT_HPD, false);
+        dp_ufp_enqueue_hpd(port, HPD_EVENT_PLUG);
+    }
+}
+
+#endif /* DP_BRIDGE_ENABLE */
 
 /* [] END OF FILE */

@@ -56,8 +56,12 @@
 /* Only a single SVID (DisplayPort) is supported when CCG is DFP. */
 #define DFP_MAX_SVID_SUPP                    (1u)
 
-/* No SVIDs supported when CCG is UFP. */
+/* DisplayPort SVID supported when CCG is UFP (DP bridge host-facing port). */
+#if UFP_ALT_MODE_SUPP
+#define UFP_MAX_SVID_SUPP                    (1u)
+#else
 #define UFP_MAX_SVID_SUPP                    (0u)
+#endif /* UFP_ALT_MODE_SUPP */
 
 /* Maximum number of SVIDs supported across operating modes. */
 #define MAX_SVID_SUPP                                                                   \
@@ -80,6 +84,17 @@ dfp_compatibility_mode_table[(DFP_MAX_SVID_SUPP)][(DFP_MAX_SVID_SUPP)] =
 };
 
 #endif /* DFP_ALT_MODE_SUPP */
+
+#if UFP_ALT_MODE_SUPP
+
+/* SVID / alt mode index table used when CCG is UFP. */
+const comp_tbl_t
+ufp_compatibility_mode_table[(UFP_MAX_SVID_SUPP)][(UFP_MAX_SVID_SUPP)] =
+{
+    {{DP_SVID, DP_ALT_MODE_ID}},        /* Use DisplayPort SVID and Alt. Mode index 0. */
+};
+
+#endif /* UFP_ALT_MODE_SUPP */
 
 #if (MAX_SVID_SUPP != 0)
 

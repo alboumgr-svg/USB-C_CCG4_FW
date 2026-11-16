@@ -161,7 +161,13 @@ bool eval_hpd_cmd(uint8_t  port, uint32_t cmd)
         if (cmd == HPD_ENABLE_CMD)
         {
             gl_alt_mode_hpd_state[port] = HPD_EVENT_UNPLUG;
-            hpd_receive_init(port, dp_snk_hpd_cbk);
+#if DP_BRIDGE_ENABLE
+            /* HPD for the host port is relayed from the LCD port, not read from the HPD pin. */
+            if (port != DP_BRIDGE_UFP_PORT)
+#endif /* DP_BRIDGE_ENABLE */
+            {
+                hpd_receive_init(port, dp_snk_hpd_cbk);
+            }
             return true;
         }
     }
@@ -307,8 +313,9 @@ bool alt_mode_hw_is_idle(uint8_t port)
 void alt_mode_hw_sleep(uint8_t port)
 {
 #if DP_DFP_SUPP
-    /* We can use the presence of a callback as indication that the HPD block is active. */
-    if (gl_hw_cmd_cbk[port] != NULL)
+    /* We can use the presence of a callback as indication that the HPD block is active.
+       Only applies to the HPD transmitter, i.e. when this port is DFP. */
+    if ((gl_hw_cmd_cbk[port] != NULL) && (gl_dpm_port_type[port] != PRT_TYPE_UFP))
     {
         /* Set the value of the HPD GPIO based on the last event. */
         if (port == 0)
@@ -325,27 +332,28 @@ void alt_mode_hw_sleep(uint8_t port)
     }
 #endif
 
-#if DP_UFP_SUPP
+#if ((DP_UFP_SUPP) && (CCG_HPD_RX_ENABLE))
     /* CDT 245126 workaround: Prepare to enter deep sleep. */
     hpd_rx_sleep_entry (port, dp_snk_get_hpd_state(port));
-#endif /* DP_UFP_SUPP */
+#endif /* (DP_UFP_SUPP) && (CCG_HPD_RX_ENABLE) */
 }
 
 void alt_mode_hw_wakeup(uint8_t port)
 {
 #if DP_DFP_SUPP
-    /* We can use the presence of a callback as indication that the HPD block is active. */
-    if (gl_hw_cmd_cbk[port] != NULL)
+    /* We can use the presence of a callback as indication that the HPD block is active.
+       Only applies to the HPD transmitter, i.e. when this port is DFP. */
+    if ((gl_hw_cmd_cbk[port] != NULL) && (gl_dpm_port_type[port] != PRT_TYPE_UFP))
     {
         /* Move the HPD pin back to HPD IO mode. */
         hpd_wakeup (port, (gl_alt_mode_hpd_state[port] > HPD_EVENT_UNPLUG));
     }
 #endif
 
-#if DP_UFP_SUPP
+#if ((DP_UFP_SUPP) && (CCG_HPD_RX_ENABLE))
     /* CDT 245126 workaround: Wakeup and revert HPD RX configurations. */
     hpd_rx_wakeup (port);
-#endif /* DP_UFP_SUPP */
+#endif /* (DP_UFP_SUPP) && (CCG_HPD_RX_ENABLE) */
 }
 
 /* [] END OF FILE */

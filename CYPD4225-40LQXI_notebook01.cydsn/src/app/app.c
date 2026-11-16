@@ -64,6 +64,79 @@
 #include <hpd.h>
 #endif /* DP_UFP_SUPP */
 
+#if DP_BRIDGE_ENABLE
+#include <dp_sid.h>
+
+/*
+ * DR_SWAP handling on the LCD facing port: CCG is a Sink there and therefore
+ * starts out as UFP, but it must be DFP to drive DP alt mode towards the LCD.
+ * The LCD controller may request the DR_SWAP itself (eval_dr_swap accepts it);
+ * if it has not done so DP_BRIDGE_DR_SWAP_DELAY ms after the contract, CCG
+ * requests it.
+ */
+static bool gl_bridge_drswap_pending = false;
+static uint8_t gl_bridge_drswap_tries = 0;
+static dpm_pd_cmd_buf_t gl_bridge_drswap_buf;
+
+static void bridge_drswap_cbk(uint8_t port, resp_status_t resp, const pd_packet_t *pkt)
+{
+    (void)resp;
+    (void)pkt;
+
+    /* Whatever the outcome, check again later. bridge_drswap_task drops the
+       request once the port is DFP or the contract is gone. */
+    if (gl_bridge_drswap_tries < DP_BRIDGE_DR_SWAP_MAX_TRIES)
+    {
+        gl_bridge_drswap_pending = true;
+        timer_start(port, APP_BRIDGE_DR_SWAP_TIMER, DP_BRIDGE_DR_SWAP_RETRY_PERIOD, NULL);
+    }
+}
+
+static void bridge_drswap_start(uint8_t port)
+{
+    gl_bridge_drswap_tries   = 0;
+    gl_bridge_drswap_pending = true;
+    timer_start(port, APP_BRIDGE_DR_SWAP_TIMER, DP_BRIDGE_DR_SWAP_DELAY, NULL);
+}
+
+static void bridge_drswap_stop(uint8_t port)
+{
+    gl_bridge_drswap_pending = false;
+    timer_stop(port, APP_BRIDGE_DR_SWAP_TIMER);
+}
+
+static void bridge_drswap_task(uint8_t port)
+{
+    if ((port != DP_BRIDGE_DFP_PORT) || (gl_bridge_drswap_pending == false))
+    {
+        return;
+    }
+
+    /* Done (already DFP) or no longer possible (no contract). */
+    if ((gl_dpm_port_type[port] != PRT_TYPE_UFP) || (dpm_get_info(port)->contract_exist == false))
+    {
+        gl_bridge_drswap_pending = false;
+        return;
+    }
+
+    if (timer_is_running(port, APP_BRIDGE_DR_SWAP_TIMER))
+    {
+        return;
+    }
+
+    if (dpm_pd_command(port, DPM_CMD_SEND_DR_SWAP, &gl_bridge_drswap_buf, bridge_drswap_cbk) == CCG_STAT_SUCCESS)
+    {
+        gl_bridge_drswap_pending = false;
+        gl_bridge_drswap_tries++;
+    }
+    else
+    {
+        /* Policy engine busy (e.g. LCD is talking to us): try again shortly. */
+        timer_start(port, APP_BRIDGE_DR_SWAP_TIMER, APP_VDM_BUSY_TIMER_PERIOD, NULL);
+    }
+}
+#endif /* DP_BRIDGE_ENABLE */
+
 #if ((CCG_HPI_ENABLE == 0) && (VBUS_OCP_RETRY_ENABLE == 1))
 uint8_t gl_vbus_ocp_retry_count[NO_OF_TYPEC_PORTS] = {0};
 
@@ -98,6 +171,18 @@ bool app_is_cbl_disc_done(uint8_t port)
             app_get_status(port)->cbl_disc_id_finished = true;
         }
 
+#if DP_BRIDGE_ENABLE
+        /*
+         * On the LCD facing port CCG is a Sink (not the VCONN source), so no
+         * cable discovery happens. The high speed lanes don't go through CCG
+         * either, so the cable capabilities don't matter: don't wait for it.
+         */
+        if (port == DP_BRIDGE_DFP_PORT)
+        {
+            app_get_status(port)->cbl_disc_id_finished = true;
+        }
+#endif /* DP_BRIDGE_ENABLE */
+
         /* Return the status of Cable discovered flag. */
         retval = app_get_status(port)->cbl_disc_id_finished;
     }
@@ -120,6 +205,11 @@ uint8_t app_task(uint8_t port)
         }
     }
 #endif /* (DFP_ALT_MODE_SUPP) || (UFP_ALT_MODE_SUPP) */	
+
+#if DP_BRIDGE_ENABLE
+    bridge_drswap_task(port);
+    dp_bridge_task(port);
+#endif /* DP_BRIDGE_ENABLE */
 
 #if (CCG_BB_ENABLE != 0)
     if (bb_is_present(port) != false)
@@ -154,7 +244,7 @@ bool app_sleep(void)
         }
 #endif /* (DFP_ALT_MODE_SUPP) || (UFP_ALT_MODE_SUPP) */
 
-#if DP_UFP_SUPP
+#if ((DP_UFP_SUPP) && (CCG_HPD_RX_ENABLE))
         /* CDT 245126 workaround: Check if HPD RX Activity timer is running.
          * If yes, don't enter deep sleep. */
         if (!is_hpd_rx_state_idle (port))
@@ -294,6 +384,14 @@ void app_event_handler(uint8_t port, app_evt_t evt, const void* dat)
 #if ((DFP_ALT_MODE_SUPP) || (UFP_ALT_MODE_SUPP))
             vdm_task_mngr_deinit (port);
 #endif /* (DFP_ALT_MODE_SUPP) || (UFP_ALT_MODE_SUPP) */
+
+#if DP_BRIDGE_ENABLE
+            if (port == DP_BRIDGE_DFP_PORT)
+            {
+                /* Re-armed by the next contract. */
+                bridge_drswap_stop(port);
+            }
+#endif /* DP_BRIDGE_ENABLE */
             
             /*
              * Re-enable MUX in USB mode if hard reset has been completed.
@@ -382,6 +480,14 @@ void app_event_handler(uint8_t port, app_evt_t evt, const void* dat)
                     enable_vdm_task_mngr(port);
                 }
 #endif /* (DFP_ALT_MODE_SUPP) || (UFP_ALT_MODE_SUPP) */
+
+#if DP_BRIDGE_ENABLE
+                /* LCD facing port must become DFP: request DR_SWAP if the LCD doesn't. */
+                if ((port == DP_BRIDGE_DFP_PORT) && (gl_dpm_port_type[port] == PRT_TYPE_UFP))
+                {
+                    bridge_drswap_start(port);
+                }
+#endif /* DP_BRIDGE_ENABLE */
             }
 
             break;

@@ -289,6 +289,20 @@
 /* Enable saving only SVIDs which are supported by CCG. */
 #define SAVE_SUPP_SVID_ONLY                         (1u)
 
+/*******************************************************************************
+ * DisplayPort pass-through bridge configuration. See ../config.h for details.
+ ******************************************************************************/
+#define UFP_ALT_MODE_SUPP                           (1u)
+#define DP_UFP_SUPP                                 (1u)
+#define DP_UFP_MONITOR                              (1u)
+#define DP_BRIDGE_ENABLE                            (1u)
+#define DP_BRIDGE_UFP_PORT                          (TYPEC_PORT_0_IDX)
+#define DP_BRIDGE_DFP_PORT                          (TYPEC_PORT_1_IDX)
+#define DP_BRIDGE_PIN_MASK                          (0x0Cu)
+#define DP_BRIDGE_DR_SWAP_DELAY                     (300u)
+#define DP_BRIDGE_DR_SWAP_RETRY_PERIOD              (1000u)
+#define DP_BRIDGE_DR_SWAP_MAX_TRIES                 (5u)
+
 /*
  * Enable/Disable firmware active LED operation.
  *

@@ -84,6 +84,20 @@ void eval_dr_swap (uint8_t port, app_resp_cbk_t app_resp_handler)
     const dpm_status_t* dpm = dpm_get_info(port);
     app_req_status_t result = REQ_REJECT;
 
+#if DP_BRIDGE_ENABLE
+    if (port == DP_BRIDGE_UFP_PORT)
+    {
+        /* Host facing port: CCG must stay UFP (DP sink towards the host). */
+        result = REQ_REJECT;
+    }
+    else if (port == DP_BRIDGE_DFP_PORT)
+    {
+        /* LCD facing port: CCG must be DFP (DP source towards the LCD).
+           Accept the swap from UFP to DFP, reject the swap back. */
+        result = (gl_dpm_port_type[port] == PRT_TYPE_UFP) ? REQ_ACCEPT : REQ_REJECT;
+    }
+    else
+#endif /* DP_BRIDGE_ENABLE */
     if(app_get_status(port)->alt_mode_entered == true)
     {
         result = REQ_SEND_HARD_RESET;

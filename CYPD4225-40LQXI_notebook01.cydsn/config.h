@@ -272,6 +272,54 @@
 /* Enable saving only SVIDs which are supported by CCG. */
 #define SAVE_SUPP_SVID_ONLY                         (1u)
 
+/*******************************************************************************
+ * DisplayPort pass-through bridge configuration.
+ *
+ * Port 0 faces the host (host = power source + DFP_D). CCG is Sink + UFP_D.
+ * Port 1 faces the LCD controller (LCD = power source + UFP_D). CCG is
+ * Sink + DFP_D; the data role is obtained via DR_SWAP (initiated by either
+ * side). The high speed lanes are wired straight from host to LCD and do not
+ * pass through CCG, so CCG only relays the DP alt mode VDM handshake:
+ *  - Pin assignment chosen by the host on port 0 is applied to port 1.
+ *  - HPD reported by the LCD on port 1 is relayed to the host on port 0
+ *    through DP Status / Attention VDMs.
+ ******************************************************************************/
+
+/* Enable Alternate Mode support when CCG is UFP (needed for port 0). */
+#define UFP_ALT_MODE_SUPP                           (1u)
+
+/* Enable DisplayPort Sink support as UFP (needed for port 0). */
+#define DP_UFP_SUPP                                 (1u)
+
+/* Always report "UFP_D connected" to the host so that it configures DP. */
+#define DP_UFP_MONITOR                              (1u)
+
+/* Enable the port 0 <-> port 1 DisplayPort bridge logic. */
+#define DP_BRIDGE_ENABLE                            (1u)
+
+/* Host facing port (CCG is UFP_D). */
+#define DP_BRIDGE_UFP_PORT                          (TYPEC_PORT_0_IDX)
+
+/* LCD facing port (CCG is DFP_D). */
+#define DP_BRIDGE_DFP_PORT                          (TYPEC_PORT_1_IDX)
+
+/*
+ * Pin assignments allowed on both bridge ports: C (4 lane DP) and D (2 lane DP +
+ * USB SS). E/F are only for DP plug adapters and must not be used with a
+ * straight-through Type-C cable.
+ */
+#define DP_BRIDGE_PIN_MASK                          (0x0Cu)
+
+/* Delay (ms) after the port 1 contract before CCG requests DR_SWAP itself.
+   This gives the LCD controller the chance to initiate the DR_SWAP first. */
+#define DP_BRIDGE_DR_SWAP_DELAY                     (300u)
+
+/* Delay (ms) between DR_SWAP attempts if the LCD rejects / does not answer. */
+#define DP_BRIDGE_DR_SWAP_RETRY_PERIOD              (1000u)
+
+/* Maximum number of DR_SWAP requests sent by CCG per contract. */
+#define DP_BRIDGE_DR_SWAP_MAX_TRIES                 (5u)
+
 /*
  * Enable/Disable firmware active LED operation.
  *
