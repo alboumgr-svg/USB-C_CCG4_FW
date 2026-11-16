@@ -242,6 +242,94 @@ update_hpi_regs (
 
 #if APP_FW_LED_ENABLE
 
+#if DP_BRIDGE_ENABLE
+#include <dp_sid.h>
+
+/*
+ * DP bridge diagnostic blink code on the FW LED, repeated continuously:
+ *   1 long flash (1 s)           -> start marker
+ *   N short blinks               -> LCD side (port 1) stage
+ *   pause
+ *   M short blinks               -> host side (port 0) stage
+ *   long pause
+ *
+ * LCD side stages (port 1):            Host side stages (port 0):
+ *   0: no PD contract                    0: no PD contract
+ *   1: PD contract                       1: PD contract
+ *   2: CCG is DFP (DR_SWAP done)         2: CCG is UFP
+ *   3: DP mode entered on the LCD        3: host entered DP mode
+ *   4: LCD configured for DP (C/D)       4: host configured DP (C/D)
+ *   5: LCD reports HPD high              5: HPD high reported to the host
+ */
+#define LED_SHORT_ON_MS         (250u)
+#define LED_SHORT_OFF_MS        (350u)
+#define LED_MARKER_ON_MS        (1000u)
+#define LED_GROUP_GAP_MS        (1500u)
+#define LED_END_GAP_MS          (3000u)
+
+void led_timer_cb (
+    uint8_t port,
+    timer_id_t id)
+{
+    static uint8_t phase = 0;       /* 0: marker, 1: LCD blinks, 2: host blinks. */
+    static uint8_t count = 0;       /* Blinks left in the current group. */
+    static bool    led_on = false;
+    static uint8_t host_stage = 0;
+    uint8_t  lcd_stage;
+    uint16_t period;
+
+    (void)port;
+    (void)id;
+
+    if (led_on)
+    {
+        /* Turn the LED off and decide how long to stay off. */
+        led_on = false;
+        gpio_set_value (FW_LED_GPIO_PORT_PIN, false);
+
+        if (phase == 0)
+        {
+            /* Marker done: latch the stages and start the LCD group. */
+            dp_bridge_get_stage (&lcd_stage, &host_stage);
+            phase  = 1;
+            count  = lcd_stage;
+            period = LED_GROUP_GAP_MS;
+        }
+        else
+        {
+            count--;
+            period = LED_SHORT_OFF_MS;
+        }
+
+        /* Group finished: go to the next group (or back to the marker). */
+        if (count == 0)
+        {
+            if (phase == 1)
+            {
+                phase  = 2;
+                count  = host_stage;
+                period = LED_GROUP_GAP_MS;
+            }
+            if ((phase == 2) && (count == 0))
+            {
+                phase  = 0;
+                period = LED_END_GAP_MS;
+            }
+        }
+    }
+    else
+    {
+        /* Turn the LED on for the marker or a short blink. */
+        led_on = true;
+        gpio_set_value (FW_LED_GPIO_PORT_PIN, true);
+        period = (phase == 0) ? LED_MARKER_ON_MS : LED_SHORT_ON_MS;
+    }
+
+    timer_start (0, LED_TIMER_ID, period, led_timer_cb);
+}
+
+#else
+
 /* Blink the LED every LED_TIMER_PERIOD ms. This serves as an indication of the firmware running. */
 void led_timer_cb (
     uint8_t port,
@@ -253,6 +341,8 @@ void led_timer_cb (
     gpio_set_value (FW_LED_GPIO_PORT_PIN, !(gpio_read_value (FW_LED_GPIO_PORT_PIN)));
     timer_start (0, LED_TIMER_ID, LED_TIMER_PERIOD, led_timer_cb);
 }
+
+#endif /* DP_BRIDGE_ENABLE */
 
 #endif /* APP_FW_LED_ENABLE */
 
