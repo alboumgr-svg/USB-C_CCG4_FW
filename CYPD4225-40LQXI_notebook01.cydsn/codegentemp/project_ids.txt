@@ -1,0 +1,5 @@
+C:\Program Files (x86)\Cypress\PSoC Creator\3.3\PSoC Creator\psoc\content\default\CyAnnotationLibrary\CyAnnotationLibrary.cylib\CyAnnotationLibrary.cyprj|705ff70e-decd-45c6-80df-2d23e43ff111
+C:\Program Files (x86)\Cypress\PSoC Creator\3.3\PSoC Creator\psoc\content\cycomponentlibraryupdates\CyComponentLibraryUpdates.cylib\CyComponentLibraryUpdates.cyprj|a0a4bfb1-bfc0-4906-a1cb-0c2423b837c5
+C:\Program Files (x86)\Cypress\PSoC Creator\3.3\PSoC Creator\psoc\content\cycomponentlibrary\CyComponentLibrary.cylib\CyComponentLibrary.cyprj|0f0750b8-9af7-4b31-b6e4-1d1d02f335a6
+C:\Program Files (x86)\Cypress\PSoC Creator\3.3\PSoC Creator\psoc\content\cyprimitives\CyPrimitives.cylib\CyPrimitives.cyprj|685b1f2b-2e31-4e13-afd0-c639c99b461b
+C:\Users\gcalb\OneDrive\galboum\Milcots\USB-C Base 4225 Notebook PSOC\CYPD4225-40LQXI_notebook01.cydsn\CYPD4225-40LQXI_notebook01.cyprj|572e8353-10d5-4b83-b06d-e70ccca903c7
