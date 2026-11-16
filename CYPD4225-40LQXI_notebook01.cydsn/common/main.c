@@ -254,13 +254,14 @@ update_hpi_regs (
  *   3 s pause
  *
  * LCD side (port 1):                     Host side (port 0):
- *   1: nothing attached                    1: nothing attached
- *   2: Type-C attached, no PD contract     2: Type-C attached, no PD contract
- *   3: PD contract, CCG still UFP          3: PD contract, but CCG is DFP (wrong)
- *   4: CCG is DFP (DR_SWAP done)           4: PD contract, CCG is UFP
- *   5: DP mode entered on the LCD          5: host entered DP mode
- *   6: LCD configured for DP (C/D)         6: host configured DP (C/D)
- *   7: LCD reports HPD high                7: HPD high reported to the host
+ *   1: nothing on CC (no Rp seen)          1: nothing on CC (no Rp seen)
+ *   2: Rp on CC, not attached (no VBUS?)   2: Rp on CC, not attached (no VBUS?)
+ *   3: attached, no PD contract            3: attached, no PD contract
+ *   4: PD contract, CCG still UFP          4: PD contract, but CCG is DFP (wrong)
+ *   5: CCG is DFP (DR_SWAP done)           5: PD contract, CCG is UFP
+ *   6: DP mode entered on the LCD          6: host entered DP mode
+ *   7: LCD configured for DP (C/D)         7: host configured DP (C/D)
+ *   8: LCD reports HPD high                8: HPD high reported to the host
  */
 #define LED_SHORT_ON_MS         (250u)
 #define LED_SHORT_OFF_MS        (350u)
