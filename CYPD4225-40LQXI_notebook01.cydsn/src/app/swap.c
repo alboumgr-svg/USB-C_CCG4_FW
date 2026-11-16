@@ -144,8 +144,16 @@ void eval_vconn_swap (uint8_t port, app_resp_cbk_t app_resp_handler)
     const dpm_status_t* dpm = dpm_get_info(port);
     app_req_status_t result = REQ_REJECT;
 
+#if DP_BRIDGE_ENABLE
+    if ((port == DP_BRIDGE_UFP_PORT) || (port == DP_BRIDGE_DFP_PORT))
+    {
+        /* CCG is a Sink on both bridge ports and never needs to supply VCONN. */
+        result = REQ_REJECT;
+    }
+    else
+#endif /* DP_BRIDGE_ENABLE */
     result = get_response(port, GET_VCONN_SWAP_RESP(dpm->swap_response));
-   
+
     app_get_resp_buf(port)->req_status = result;
     app_resp_handler(port, app_get_resp_buf(port));
 }

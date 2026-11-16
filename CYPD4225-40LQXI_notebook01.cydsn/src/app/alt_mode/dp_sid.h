@@ -277,6 +277,15 @@ alt_mode_info_t* reg_dp_modes(uint8_t port, alt_mode_reg_info_t* reg_info);
  * @return None
  */
 void dp_bridge_task(uint8_t port);
+
+/**
+ * @brief Returns how far the DP bridge got on each side (used for the LED
+ * diagnostic blink code). Stages 0-5, see dp_sid.c.
+ * @param lcd_stage Stage of the LCD facing port.
+ * @param host_stage Stage of the host facing port.
+ * @return None
+ */
+void dp_bridge_get_stage(uint8_t *lcd_stage, uint8_t *host_stage);
 #endif /* DP_BRIDGE_ENABLE */
 
 #if DP_GPIO_CONFIG_SELECT

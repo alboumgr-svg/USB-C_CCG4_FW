@@ -105,6 +105,22 @@ static void bridge_drswap_stop(uint8_t port)
     timer_stop(port, APP_BRIDGE_DR_SWAP_TIMER);
 }
 
+/*
+ * Disable cable discovery on the bridge ports. CCG is a Sink on both ports and
+ * the high speed lanes don't pass through it, so cable discovery is useless.
+ * Worse: with cable discovery enabled, the PD stack tries to become VCONN
+ * source (VCONN_SWAP) as soon as port 1 turns DFP after the DR_SWAP, which can
+ * end in a hard reset and puts port 1 back to UFP. There is no stack API for
+ * this flag, so it is cleared directly in the DPM status (read live by the stack).
+ */
+static void bridge_disable_cbl_disc(uint8_t port)
+{
+    if ((port == DP_BRIDGE_DFP_PORT) || (port == DP_BRIDGE_UFP_PORT))
+    {
+        ((dpm_status_t *)dpm_get_info(port))->cbl_dsc = false;
+    }
+}
+
 static void bridge_drswap_task(uint8_t port)
 {
     if ((port != DP_BRIDGE_DFP_PORT) || (gl_bridge_drswap_pending == false))
@@ -353,9 +369,15 @@ void app_event_handler(uint8_t port, app_evt_t evt, const void* dat)
             /* Initialize the MUX to its default settings (isolate). */
             mux_ctrl_init (port);
             app_get_status(port)->vdm_prcs_failed = false;
+#if DP_BRIDGE_ENABLE
+            bridge_disable_cbl_disc(port);
+#endif /* DP_BRIDGE_ENABLE */
             break;
 
         case APP_EVT_CONNECT:
+#if DP_BRIDGE_ENABLE
+            bridge_disable_cbl_disc(port);
+#endif /* DP_BRIDGE_ENABLE */
             set_mux (port, MUX_CONFIG_SS_ONLY, 0);
             app_get_status(port)->vdm_prcs_failed = false;
 
