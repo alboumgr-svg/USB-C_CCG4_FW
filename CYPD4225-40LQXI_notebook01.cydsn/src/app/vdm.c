@@ -306,6 +306,18 @@ void eval_vdm(uint8_t port, const pd_packet_t *vdm, vdm_resp_cbk_t vdm_resp_hand
                              */
                             app_stat->vdm_resp.resp_buf[1].std_dp_vdo.dfp_d_pin = dp_sink_get_pin_config ();
 #endif /* DP_GPIO_CONFIG_SELECT */
+#if DP_BRIDGE_ENABLE
+                            /* Only offer pin assignments C/D to the host (see DP_BRIDGE_PIN_MASK). */
+                            if ((port == DP_BRIDGE_UFP_PORT) &&
+                                    (vdm->dat[VDM_HEADER_IDX].std_vdm_hdr.svid == 0xFF01u /* DP_SVID */))
+                            {
+                                for (i = VDO_START_IDX; i < count; i++)
+                                {
+                                    app_stat->vdm_resp.resp_buf[i].std_dp_vdo.ufp_d_pin &= DP_BRIDGE_PIN_MASK;
+                                    app_stat->vdm_resp.resp_buf[i].std_dp_vdo.dfp_d_pin &= DP_BRIDGE_PIN_MASK;
+                                }
+                            }
+#endif /* DP_BRIDGE_ENABLE */
                             /* Set VDM Response ACKed */
                             app_stat->vdm_resp.resp_buf[VDM_HEADER_IDX].std_vdm_hdr.cmd_type = CMD_TYPE_RESP_ACK;
                         }               

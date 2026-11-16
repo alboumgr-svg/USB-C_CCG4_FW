@@ -268,6 +268,17 @@ typedef enum
  */
 alt_mode_info_t* reg_dp_modes(uint8_t port, alt_mode_reg_info_t* reg_info);
 
+#if DP_BRIDGE_ENABLE
+/**
+ * @brief DP bridge background task. Applies the host's DP pin assignment to
+ * the LCD facing port and sends the post-Configure HPD Attention to the host.
+ * Must be called from the main loop for every port.
+ * @param port Port index.
+ * @return None
+ */
+void dp_bridge_task(uint8_t port);
+#endif /* DP_BRIDGE_ENABLE */
+
 #if DP_GPIO_CONFIG_SELECT
 /**
  * @brief Store the DP Pin configuration based on GPIO status.

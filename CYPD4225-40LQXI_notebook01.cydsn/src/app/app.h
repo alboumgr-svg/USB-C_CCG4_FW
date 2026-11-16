@@ -112,6 +112,18 @@
  */
 #define APP_VBUS_OCP_OFF_TIMER                          (42u)
 /**
+    @brief DP bridge: delay/retry timer for the DR_SWAP requested by CCG.
+ */
+#define APP_BRIDGE_DR_SWAP_TIMER                        (43u)
+/**
+    @brief DP bridge: delay timer for the HPD Attention sent to the host after Configure.
+ */
+#define APP_BRIDGE_ATT_TIMER                            (44u)
+/**
+    @brief DP bridge: delay (ms) between host Configure ACK and the HPD Attention.
+ */
+#define APP_BRIDGE_ATT_TIMER_PERIOD                     (20u)
+/**
    @brief VDM busy timer period (in ms).
  */
 #define APP_VDM_BUSY_TIMER_PERIOD                       (50u)
